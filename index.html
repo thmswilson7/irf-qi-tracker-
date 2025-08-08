@@ -60,6 +60,12 @@
 
     <textarea id="summaryOutput" readonly placeholder="Generated summary will appear here..."></textarea>
     <button onclick="copySummary()">Copy Summary</button>
+
+    <div class="section" style="margin-top:30px;">
+      <label for="udsSnippet"><strong>UDS Note Snippet (Progress, Barriers, Interventions):</strong></label>
+      <textarea id="udsSnippet" readonly placeholder="This snippet can be copied into UDS/Rehab Connect notes..."></textarea>
+      <button onclick="copyUdsSnippet()">Copy UDS Snippet</button>
+    </div>
   </div>
 
   <script>
@@ -91,6 +97,9 @@
       const pin = document.getElementById('pinInput').value;
       if (pin === correctPin) {
         document.getElementById('app').style.display = 'block';
+        document.getElementById('pinInput').style.display = 'none';
+        document.querySelector('button[onclick="login()"]').style.display = 'none';
+        document.getElementById('patientSelector').focus();
       } else {
         alert('Incorrect PIN');
       }
@@ -135,7 +144,6 @@
         const currentVal = div.querySelector('.currentScore').value;
         const previousVal = div.querySelector('.previousScore').value;
 
-        // Only include tasks with a selected score
         if (currentVal && previousVal) {
           const currentLabel = scores[currentVal] || currentVal;
           const previousLabel = scores[previousVal] || previousVal;
@@ -178,6 +186,14 @@
       summary += `Interventions: ${selectedInterventions.join(', ') || 'None'}\n`;
 
       document.getElementById('summaryOutput').value = summary;
+
+      // Also create UDS snippet for quick copy/paste
+      const udsSnippet = 
+        `Progress Status: ${progressStatus}\n` +
+        `Barriers to Goals: ${selectedBarriers.join(', ') || 'None'}\n` +
+        `Interventions: ${selectedInterventions.join(', ') || 'None'}`;
+
+      document.getElementById('udsSnippet').value = udsSnippet;
     }
 
     function copySummary() {
@@ -189,6 +205,17 @@
       navigator.clipboard.writeText(summaryText)
         .then(() => alert('Summary copied to clipboard!'))
         .catch(() => alert('Failed to copy summary.'));
+    }
+
+    function copyUdsSnippet() {
+      const snippetText = document.getElementById('udsSnippet').value;
+      if (!snippetText) {
+        alert('Please generate the summary first.');
+        return;
+      }
+      navigator.clipboard.writeText(snippetText)
+        .then(() => alert('UDS snippet copied to clipboard!'))
+        .catch(() => alert('Failed to copy snippet.'));
     }
 
     render();
