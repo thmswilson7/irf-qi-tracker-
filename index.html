@@ -89,9 +89,29 @@
       5: 'Setup A',
       6: 'Independent',
       88: 'Not Attempted',
-      09: 'Not Applicable',
-      07: 'Refused'
+      7: 'Refused',
+      9: 'Not Applicable'
     };
+
+    function storageKey(patient, task, type) {
+      return `qi_${patient}_${task}_${type}`;
+    }
+
+    function saveScore(patient, task, type, value) {
+      try {
+        localStorage.setItem(storageKey(patient, task, type), value);
+      } catch(e) {
+        console.warn('LocalStorage error:', e);
+      }
+    }
+
+    function loadScore(patient, task, type) {
+      try {
+        return localStorage.getItem(storageKey(patient, task, type));
+      } catch(e) {
+        return null;
+      }
+    }
 
     function login() {
       const pin = document.getElementById('pinInput').value;
@@ -121,19 +141,61 @@
       });
 
       const tasksDiv = document.getElementById('tasks');
+      tasksDiv.innerHTML = ''; // Clear previous
       tasks.forEach(task => {
         const div = document.createElement('div');
         div.className = 'task';
+
         div.innerHTML = `<strong>${task}</strong>
           <div class="scores">
-            <label>Current: <select class="currentScore">${scoreOptions()}</select></label>
-            <label>Previous: <select class="previousScore">${scoreOptions()}</select></label>
+            <label>Eval Score: <select class="evalScore">${scoreOptions()}</select></label>
+            <label>Discharge Goal: <select class="dischargeScore">${scoreOptions()}</select></label>
+            <label>Current Score: <select class="currentScore">${scoreOptions()}</select></label>
           </div>`;
         tasksDiv.appendChild(div);
       });
     }
 
+    function loadPatientData(patient) {
+      const tasksDiv = document.getElementById('tasks');
+      const taskDivs = tasksDiv.getElementsByClassName('task');
+
+      for (const div of taskDivs) {
+        const taskName = div.querySelector('strong').textContent;
+
+        // Load Eval Score
+        const evalSelect = div.querySelector('.evalScore');
+        const evalVal = loadScore(patient, taskName, 'eval');
+        if (evalVal) evalSelect.value = evalVal;
+        evalSelect.onchange = () => saveScore(patient, taskName, 'eval', evalSelect.value);
+
+        // Load Discharge Goal Score
+        const dischargeSelect = div.querySelector('.dischargeScore');
+        const dischargeVal = loadScore(patient, taskName, 'discharge');
+        if (dischargeVal) dischargeSelect.value = dischargeVal;
+        dischargeSelect.onchange = () => saveScore(patient, taskName, 'discharge', dischargeSelect.value);
+
+        // Load Current Score and save on change too!
+        const currentSelect = div.querySelector('.currentScore');
+        const currentVal = loadScore(patient, taskName, 'current');
+        if (currentVal) currentSelect.value = currentVal;
+        currentSelect.onchange = () => saveScore(patient, taskName, 'current', currentSelect.value);
+      }
+
+      // Load other saved data if you want (patient goal, progress, barriers, interventions) here if you want persistence later.
+    }
+
+    document.getElementById('patientSelector').addEventListener('change', (e) => {
+      loadPatientData(e.target.value);
+    });
+
     function generateSummary() {
+      const patient = document.getElementById('patientSelector').value;
+      if (!patient) {
+        alert('Please select a patient.');
+        return;
+      }
+
       const tasksDiv = document.getElementById('tasks');
       const taskDivs = tasksDiv.getElementsByClassName('task');
 
@@ -141,14 +203,16 @@
 
       for (const div of taskDivs) {
         const taskName = div.querySelector('strong').textContent;
+        const evalVal = div.querySelector('.evalScore').value;
+        const dischargeVal = div.querySelector('.dischargeScore').value;
         const currentVal = div.querySelector('.currentScore').value;
-        const previousVal = div.querySelector('.previousScore').value;
 
-        if (currentVal && previousVal) {
-          const currentLabel = scores[currentVal] || currentVal;
-          const previousLabel = scores[previousVal] || previousVal;
+        if (evalVal || dischargeVal || currentVal) {
+          const evalLabel = scores[evalVal] || evalVal || 'N/A';
+          const dischargeLabel = scores[dischargeVal] || dischargeVal || 'N/A';
+          const currentLabel = scores[currentVal] || currentVal || 'N/A';
 
-          summary += `${taskName}:\n  Previous Score: ${previousVal} (${previousLabel})\n  Current Score: ${currentVal} (${currentLabel})\n\n`;
+          summary += `${taskName}:\n  Eval Score: ${evalVal} (${evalLabel})\n  Discharge Goal: ${dischargeVal} (${dischargeLabel})\n  Current Score: ${currentVal} (${currentLabel})\n\n`;
         }
       }
 
@@ -218,6 +282,7 @@
         .catch(() => alert('Failed to copy snippet.'));
     }
 
+    // Initial render
     render();
   </script>
 </body>
