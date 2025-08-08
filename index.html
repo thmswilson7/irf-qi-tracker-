@@ -8,13 +8,14 @@
     body { font-family: Arial, sans-serif; padding: 20px; max-width: 700px; margin: auto; }
     h1 { font-size: 1.5em; }
     .task { margin-bottom: 15px; }
-    .scores { display: flex; gap: 10px; margin-top: 5px; }
+    .scores { display: flex; gap: 10px; margin-top: 5px; flex-wrap: wrap; }
     select, input[type="text"], textarea { padding: 5px; font-size: 1em; }
     label { margin-right: 10px; }
     textarea { width: 100%; height: 120px; margin-top: 10px; font-family: monospace; white-space: pre-wrap; }
     button { margin-top: 10px; padding: 8px 15px; font-size: 1em; cursor: pointer; }
     .section { border: 1px solid #ccc; padding: 10px; margin-top: 20px; border-radius: 5px; }
     .checkbox-group label { display: inline-block; margin-right: 15px; }
+    .scores label { min-width: 120px; }
   </style>
 </head>
 <body>
@@ -24,53 +25,49 @@
 
   <div id="app" style="display:none;">
     <label>Patient:
-      <select id="patientSelector"></select>
+      <select id="patientSelector" onchange="onPatientChange()"></select>
     </label>
 
     <div id="tasks"></div>
 
     <div class="section">
       <label for="patientGoal"><strong>Patient Goal (free text):</strong></label><br/>
-      <textarea id="patientGoal" placeholder="Enter patient goal here..."></textarea>
+      <textarea id="patientGoal" placeholder="Enter patient goal here..." oninput="savePatientGoal()"></textarea>
     </div>
 
     <div class="section checkbox-group">
       <strong>Progress Status:</strong><br/>
-      <label><input type="radio" name="progressStatus" value="Progressing" checked /> Progressing</label>
-      <label><input type="radio" name="progressStatus" value="Not Progressing" /> Not Progressing</label>
+      <label><input type="radio" name="progressStatus" value="Progressing" checked onchange="saveProgressStatus()" /> Progressing</label>
+      <label><input type="radio" name="progressStatus" value="Not Progressing" onchange="saveProgressStatus()" /> Not Progressing</label>
     </div>
 
     <div class="section checkbox-group">
       <strong>Barriers to Goals:</strong><br/>
-      <label><input type="checkbox" class="barrier" value="Weakness" checked /> Weakness</label>
-      <label><input type="checkbox" class="barrier" value="Deconditioning" checked /> Deconditioning</label>
-      <label><input type="checkbox" class="barrier" value="Balance Impairment" checked /> Balance Impairment</label>
-      <label><input type="checkbox" class="barrier" value="Limited ROM" checked /> Limited ROM</label>
-      <label><input type="checkbox" class="barrier" value="Pain" checked /> Pain</label>
+      <label><input type="checkbox" class="barrier" value="Weakness" checked onchange="saveBarriers()" /> Weakness</label>
+      <label><input type="checkbox" class="barrier" value="Deconditioning" checked onchange="saveBarriers()" /> Deconditioning</label>
+      <label><input type="checkbox" class="barrier" value="Balance Impairment" checked onchange="saveBarriers()" /> Balance Impairment</label>
+      <label><input type="checkbox" class="barrier" value="Limited ROM" checked onchange="saveBarriers()" /> Limited ROM</label>
+      <label><input type="checkbox" class="barrier" value="Pain" checked onchange="saveBarriers()" /> Pain</label>
     </div>
 
     <div class="section checkbox-group">
       <strong>Interventions:</strong><br/>
-      <label><input type="checkbox" class="intervention" value="Therapeutic Exercise" checked /> Therapeutic Exercise</label>
-      <label><input type="checkbox" class="intervention" value="Therapeutic Activity" checked /> Therapeutic Activity</label>
-      <label><input type="checkbox" class="intervention" value="ADL Training" checked /> ADL Training</label>
+      <label><input type="checkbox" class="intervention" value="Therapeutic Exercise" checked onchange="saveInterventions()" /> Therapeutic Exercise</label>
+      <label><input type="checkbox" class="intervention" value="Therapeutic Activity" checked onchange="saveInterventions()" /> Therapeutic Activity</label>
+      <label><input type="checkbox" class="intervention" value="ADL Training" checked onchange="saveInterventions()" /> ADL Training</label>
     </div>
 
     <button onclick="generateSummary()">Generate Summary</button>
 
     <textarea id="summaryOutput" readonly placeholder="Generated summary will appear here..."></textarea>
     <button onclick="copySummary()">Copy Summary</button>
-
-    <div class="section" style="margin-top:30px;">
-      <label for="udsSnippet"><strong>UDS Note Snippet (Progress, Barriers, Interventions):</strong></label>
-      <textarea id="udsSnippet" readonly placeholder="This snippet can be copied into UDS/Rehab Connect notes..."></textarea>
-      <button onclick="copyUdsSnippet()">Copy UDS Snippet</button>
-    </div>
   </div>
 
   <script>
     const correctPin = '1234';
-    const patients = ['Room 101', 'Room 102', 'Room 103'];
+    const patients = [];
+    for(let i=101; i<=135; i++) { patients.push('Room ' + i); }
+
     const tasks = [
       'Eating',
       'Oral Hygiene',
@@ -81,6 +78,7 @@
       'Toilet Hygiene',
       'Toilet Transfers'
     ];
+
     const scores = {
       1: 'Dependent',
       2: 'Substantial A',
@@ -89,71 +87,115 @@
       5: 'Setup A',
       6: 'Independent',
       88: 'Not Attempted',
-      7: 'Refused',
-      9: 'Not Applicable'
+      9: 'Not Applicable',  // stored as 9 but displayed as 09
+      7: 'Refused'
     };
 
-    function storageKey(patient, task, type) {
-      return `qi_${patient}_${task}_${type}`;
-    }
+    // Defaults for first load eval scores:
+    const defaultEvalScores = {
+      'Eating': '4',
+      'Oral Hygiene': '4',
+      'Shower': '2',
+      'Upper Body Dressing': '4',
+      'Lower Body Dressing': '2',
+      'Toilet Transfers': '3',
+      'Toilet Hygiene': '2'
+      // Footwear no default, blank
+    };
+    const defaultDischargeScore = '6';
 
-    function saveScore(patient, task, type, value) {
-      try {
-        localStorage.setItem(storageKey(patient, task, type), value);
-      } catch(e) {
-        console.warn('LocalStorage error:', e);
-      }
-    }
-
-    function loadScore(patient, task, type) {
-      try {
-        return localStorage.getItem(storageKey(patient, task, type));
-      } catch(e) {
-        return null;
-      }
-    }
+    let currentPatient = null;
 
     function login() {
       const pin = document.getElementById('pinInput').value;
       if (pin === correctPin) {
         document.getElementById('app').style.display = 'block';
-        document.getElementById('pinInput').style.display = 'none';
-        document.querySelector('button[onclick="login()"]').style.display = 'none';
-        document.getElementById('patientSelector').focus();
+        initPatientSelector();
       } else {
         alert('Incorrect PIN');
       }
     }
 
-    function scoreOptions() {
-      return Object.entries(scores)
-        .map(([val, label]) => `<option value="${val}">${val} - ${label}</option>`)
-        .join('');
-    }
-
-    function render() {
+    function initPatientSelector() {
       const selector = document.getElementById('patientSelector');
+      selector.innerHTML = '';
       patients.forEach(p => {
         const opt = document.createElement('option');
         opt.value = p;
         opt.textContent = p;
         selector.appendChild(opt);
       });
+      // Select first patient by default
+      selector.value = patients[0];
+      currentPatient = patients[0];
+      renderTasks();
+      loadPatientData(currentPatient);
+      loadOtherData();
+    }
 
+    function onPatientChange() {
+      const selector = document.getElementById('patientSelector');
+      currentPatient = selector.value;
+      clearSummary();
+      renderTasks();
+      loadPatientData(currentPatient);
+      loadOtherData();
+    }
+
+    function renderTasks() {
       const tasksDiv = document.getElementById('tasks');
-      tasksDiv.innerHTML = ''; // Clear previous
+      tasksDiv.innerHTML = '';
       tasks.forEach(task => {
         const div = document.createElement('div');
         div.className = 'task';
-
         div.innerHTML = `<strong>${task}</strong>
           <div class="scores">
-            <label>Eval Score: <select class="evalScore">${scoreOptions()}</select></label>
-            <label>Discharge Goal: <select class="dischargeScore">${scoreOptions()}</select></label>
-            <label>Current Score: <select class="currentScore">${scoreOptions()}</select></label>
+            <label>Eval Score: 
+              <select class="evalScore">${scoreOptions()}</select>
+            </label>
+            <label>Discharge Goal: 
+              <select class="dischargeScore">${scoreOptions()}</select>
+            </label>
+            <label>Current Score: 
+              <select class="currentScore">${scoreOptions()}</select>
+            </label>
           </div>`;
         tasksDiv.appendChild(div);
+
+        // Add onchange listeners to save scores
+        div.querySelector('.evalScore').onchange = () => {
+          saveScore(currentPatient, task, 'eval', div.querySelector('.evalScore').value);
+        };
+        div.querySelector('.dischargeScore').onchange = () => {
+          saveScore(currentPatient, task, 'discharge', div.querySelector('.dischargeScore').value);
+        };
+        div.querySelector('.currentScore').onchange = () => {
+          saveScore(currentPatient, task, 'current', div.querySelector('.currentScore').value);
+        };
       });
+    }
+
+    function scoreOptions() {
+      // Display '09' instead of '9' for Not Applicable
+      return Object.entries(scores)
+        .map(([val, label]) => {
+          let displayVal = val;
+          if(val === '9' || val === 9) displayVal = '09';
+          return `<option value="${val}">${displayVal} - ${label}</option>`;
+        })
+        .join('');
+    }
+
+    // localStorage keys:
+    // QI scores: 'qi_{patient}_{task}_{type}'
+    // Other data keys: 'qi_{patient}_goal', 'qi_{patient}_progress', 'qi_{patient}_barriers', 'qi_{patient}_interventions'
+
+    function saveScore(patient, task, type, val) {
+      localStorage.setItem(`qi_${patient}_${task}_${type}`, val);
+    }
+
+    function loadScore(patient, task, type) {
+      return localStorage.getItem(`qi_${patient}_${task}_${type}`);
     }
 
     function loadPatientData(patient) {
@@ -163,63 +205,131 @@
       for (const div of taskDivs) {
         const taskName = div.querySelector('strong').textContent;
 
-        // Load Eval Score
-        const evalSelect = div.querySelector('.evalScore');
-        const evalVal = loadScore(patient, taskName, 'eval');
-        if (evalVal) evalSelect.value = evalVal;
-        evalSelect.onchange = () => saveScore(patient, taskName, 'eval', evalSelect.value);
+        // Load Eval or default and save default if first time
+        let evalVal = loadScore(patient, taskName, 'eval');
+        if (!evalVal) {
+          evalVal = defaultEvalScores[taskName] || '';
+          if(evalVal) saveScore(patient, taskName, 'eval', evalVal);
+        }
+        div.querySelector('.evalScore').value = evalVal;
 
-        // Load Discharge Goal Score
-        const dischargeSelect = div.querySelector('.dischargeScore');
-        const dischargeVal = loadScore(patient, taskName, 'discharge');
-        if (dischargeVal) dischargeSelect.value = dischargeVal;
-        dischargeSelect.onchange = () => saveScore(patient, taskName, 'discharge', dischargeSelect.value);
+        // Load Discharge or default 6
+        let dischargeVal = loadScore(patient, taskName, 'discharge');
+        if (!dischargeVal) {
+          dischargeVal = defaultDischargeScore;
+          saveScore(patient, taskName, 'discharge', dischargeVal);
+        }
+        div.querySelector('.dischargeScore').value = dischargeVal;
 
-        // Load Current Score and save on change too!
-        const currentSelect = div.querySelector('.currentScore');
+        // Load current score or blank
         const currentVal = loadScore(patient, taskName, 'current');
-        if (currentVal) currentSelect.value = currentVal;
-        currentSelect.onchange = () => saveScore(patient, taskName, 'current', currentSelect.value);
+        if(currentVal) div.querySelector('.currentScore').value = currentVal;
       }
-
-      // Load other saved data if you want (patient goal, progress, barriers, interventions) here if you want persistence later.
     }
 
-    document.getElementById('patientSelector').addEventListener('change', (e) => {
-      loadPatientData(e.target.value);
-    });
+    // Other persistent data: patientGoal, progressStatus, barriers, interventions
+
+    function savePatientGoal() {
+      localStorage.setItem(`qi_${currentPatient}_goal`, document.getElementById('patientGoal').value);
+    }
+    function loadPatientGoal() {
+      return localStorage.getItem(`qi_${currentPatient}_goal`) || '';
+    }
+
+    function saveProgressStatus() {
+      const radios = document.getElementsByName('progressStatus');
+      let val = 'Progressing';
+      radios.forEach(radio => { if(radio.checked) val = radio.value; });
+      localStorage.setItem(`qi_${currentPatient}_progress`, val);
+    }
+    function loadProgressStatus() {
+      return localStorage.getItem(`qi_${currentPatient}_progress`) || 'Progressing';
+    }
+
+    function saveBarriers() {
+      const checked = [...document.querySelectorAll('.barrier:checked')].map(c => c.value);
+      localStorage.setItem(`qi_${currentPatient}_barriers`, JSON.stringify(checked));
+    }
+    function loadBarriers() {
+      const val = localStorage.getItem(`qi_${currentPatient}_barriers`);
+      if(!val) return ['Weakness', 'Deconditioning', 'Balance Impairment', 'Limited ROM', 'Pain'];
+      try {
+        return JSON.parse(val);
+      } catch {
+        return ['Weakness', 'Deconditioning', 'Balance Impairment', 'Limited ROM', 'Pain'];
+      }
+    }
+
+    function saveInterventions() {
+      const checked = [...document.querySelectorAll('.intervention:checked')].map(c => c.value);
+      localStorage.setItem(`qi_${currentPatient}_interventions`, JSON.stringify(checked));
+    }
+    function loadInterventions() {
+      const val = localStorage.getItem(`qi_${currentPatient}_interventions`);
+      if(!val) return ['Therapeutic Exercise', 'Therapeutic Activity', 'ADL Training'];
+      try {
+        return JSON.parse(val);
+      } catch {
+        return ['Therapeutic Exercise', 'Therapeutic Activity', 'ADL Training'];
+      }
+    }
+
+    function loadOtherData() {
+      // Load Patient Goal
+      document.getElementById('patientGoal').value = loadPatientGoal();
+
+      // Load Progress Status
+      const progressVal = loadProgressStatus();
+      const radios = document.getElementsByName('progressStatus');
+      radios.forEach(radio => radio.checked = (radio.value === progressVal));
+
+      // Load Barriers
+      const barriers = loadBarriers();
+      document.querySelectorAll('.barrier').forEach(cb => {
+        cb.checked = barriers.includes(cb.value);
+      });
+
+      // Load Interventions
+      const interventions = loadInterventions();
+      document.querySelectorAll('.intervention').forEach(cb => {
+        cb.checked = interventions.includes(cb.value);
+      });
+    }
 
     function generateSummary() {
-      const patient = document.getElementById('patientSelector').value;
-      if (!patient) {
-        alert('Please select a patient.');
-        return;
-      }
-
       const tasksDiv = document.getElementById('tasks');
       const taskDivs = tasksDiv.getElementsByClassName('task');
 
       let summary = '';
 
+      summary += 'EVAL SCORES:\n';
       for (const div of taskDivs) {
         const taskName = div.querySelector('strong').textContent;
         const evalVal = div.querySelector('.evalScore').value;
-        const dischargeVal = div.querySelector('.dischargeScore').value;
-        const currentVal = div.querySelector('.currentScore').value;
+        const evalLabel = scores[evalVal] || evalVal;
+        summary += `  ${taskName}: ${evalVal === '9' ? '09' : evalVal} - ${evalLabel}\n`;
+      }
 
-        if (evalVal || dischargeVal || currentVal) {
-          const evalLabel = scores[evalVal] || evalVal || 'N/A';
-          const dischargeLabel = scores[dischargeVal] || dischargeVal || 'N/A';
-          const currentLabel = scores[currentVal] || currentVal || 'N/A';
+      summary += '\nDISCHARGE GOALS:\n';
+      for (const div of taskDivs) {
+        const taskName = div.querySelector('strong').textContent;
+        const disVal = div.querySelector('.dischargeScore').value;
+        const disLabel = scores[disVal] || disVal;
+        summary += `  ${taskName}: ${disVal === '9' ? '09' : disVal} - ${disLabel}\n`;
+      }
 
-          summary += `${taskName}:\n  Eval Score: ${evalVal} (${evalLabel})\n  Discharge Goal: ${dischargeVal} (${dischargeLabel})\n  Current Score: ${currentVal} (${currentLabel})\n\n`;
-        }
+      summary += '\nCURRENT SCORES:\n';
+      for (const div of taskDivs) {
+        const taskName = div.querySelector('strong').textContent;
+        const curVal = div.querySelector('.currentScore').value;
+        const curLabel = scores[curVal] || curVal;
+        summary += `  ${taskName}: ${curVal === '9' ? '09' : curVal} - ${curLabel}\n`;
       }
 
       // Patient Goal
       const patientGoal = document.getElementById('patientGoal').value.trim();
       if (patientGoal) {
-        summary += `Patient Goal:\n  ${patientGoal}\n\n`;
+        summary += `\nPATIENT GOAL:\n  ${patientGoal}\n`;
       }
 
       // Progress Status
@@ -231,7 +341,7 @@
           break;
         }
       }
-      summary += `Progress Status: ${progressStatus}\n\n`;
+      summary += `\nPROGRESS STATUS: ${progressStatus}\n`;
 
       // Barriers
       const barrierElems = document.querySelectorAll('.barrier');
@@ -239,7 +349,7 @@
       barrierElems.forEach(el => {
         if (el.checked) selectedBarriers.push(el.value);
       });
-      summary += `Barriers to Goals: ${selectedBarriers.join(', ') || 'None'}\n\n`;
+      summary += `\nBARRIERS TO GOALS: ${selectedBarriers.join(', ') || 'None'}\n`;
 
       // Interventions
       const interventionElems = document.querySelectorAll('.intervention');
@@ -247,17 +357,9 @@
       interventionElems.forEach(el => {
         if (el.checked) selectedInterventions.push(el.value);
       });
-      summary += `Interventions: ${selectedInterventions.join(', ') || 'None'}\n`;
+      summary += `\nINTERVENTIONS: ${selectedInterventions.join(', ') || 'None'}\n`;
 
       document.getElementById('summaryOutput').value = summary;
-
-      // Also create UDS snippet for quick copy/paste
-      const udsSnippet = 
-        `Progress Status: ${progressStatus}\n` +
-        `Barriers to Goals: ${selectedBarriers.join(', ') || 'None'}\n` +
-        `Interventions: ${selectedInterventions.join(', ') || 'None'}`;
-
-      document.getElementById('udsSnippet').value = udsSnippet;
     }
 
     function copySummary() {
@@ -271,19 +373,6 @@
         .catch(() => alert('Failed to copy summary.'));
     }
 
-    function copyUdsSnippet() {
-      const snippetText = document.getElementById('udsSnippet').value;
-      if (!snippetText) {
-        alert('Please generate the summary first.');
-        return;
-      }
-      navigator.clipboard.writeText(snippetText)
-        .then(() => alert('UDS snippet copied to clipboard!'))
-        .catch(() => alert('Failed to copy snippet.'));
-    }
-
-    // Initial render
-    render();
   </script>
 </body>
 </html>
