@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IRF QI Tracker Full</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    h1 { font-size: 1.5em; }
+    .task { margin-bottom: 10px; }
+    .scores { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    label { margin-right: 10px; }
+    select, input[type="text"], textarea { padding: 5px; font-size: 1em; width: 100%; max-width: 300px; }
+    textarea { height: 60px; resize: vertical; }
+    .section { margin-top: 20px; margin-bottom: 20px; }
+    .checkbox-group label { display: inline-block; margin-right: 10px; }
+  </style>
+</head>
+<body>
+  <h1>IRF QI Tracker</h1>
+
+  <div id="login-section">
+    <label>Enter PIN: <input type="password" id="pinInput" /></label>
+    <button onclick="login()">Login</button>
+  </div>
+
+  <div id="app" style="display:none;">
+    <label for="patientSelector">Room:</label>
+    <select id="patientSelector" onchange="loadData()"></select>
+
+    <div class="section">
+      <h2>Eval QI Scores</h2>
+      <div id="evalScores"></div>
+    </div>
+
+    <div class="section">
+      <h2>Discharge Goal QI Scores</h2>
+      <div id="goalScores"></div>
+    </div>
+
+    <div class="section">
+      <h2>Current QI Scores</h2>
+      <div id="currentScores"></div>
+    </div>
+
+    <div class="section">
+      <h2>Patient Goal</h2>
+      <textarea id="patientGoal" placeholder="Enter patient goal here..."></textarea>
+    </div>
+
+    <div class="section">
+      <h2>Progress Status</h2>
+      <label><input type="radio" name="progressStatus" value="Progressing" checked> Progressing</label>
+      <label><input type="radio" name="progressStatus" value="Not Progressing"> Not Progressing</label>
+    </div>
+
+    <div class="section checkbox-group">
+      <h2>Barriers to Goals</h2>
+      <label><input type="checkbox" class="barrier" value="Weakness" checked> Weakness</label>
+      <label><input type="checkbox" class="barrier" value="Deconditioning" checked> Deconditioning</label>
+      <label><input type="checkbox" class="barrier" value="Balance Impairment" checked> Balance Impairment</label>
+      <label><input type="checkbox" class="barrier" value="Limited ROM" checked> Limited ROM</label>
+      <label><input type="checkbox" class="barrier" value="Pain" checked> Pain</label>
+    </div>
+
+    <div class="section checkbox-group">
+      <h2>Interventions</h2>
+      <label><input type="checkbox" class="intervention" value="Therapeutic Exercise" checked> Therapeutic Exercise</label>
+      <label><input type="checkbox" class="intervention" value="Therapeutic Activity" checked> Therapeutic Activity</label>
+      <label><input type="checkbox" class="intervention" value="ADL Training" checked> ADL Training</label>
+    </div>
+
+    <div class="section">
+      <h2>DME Notes</h2>
+      <textarea id="dmeNotes" placeholder="Enter durable medical equipment notes..."></textarea>
+    </div>
+  </div>
+
+  <script>
+    const correctPin = '1234';
+    const rooms = ['Room 101', 'Room 102', 'Room 103'];
+    const tasks = [
+      'Eating',
+      'Oral Hygiene',
+      'Upper Body Dressing',
+      'Lower Body Dressing',
+      'Footwear',
+      'Shower',
+      'Toilet Hygiene',
+      'Toilet Transfers'
+    ];
+    const scores = {
+      1: 'Dependent',
+      2: 'Substantial A',
+      3: 'Partial A',
+      4: 'Supervision/Touch A',
+      5: 'Setup A',
+      6: 'Independent'
+    };
+
+    // Helpers for localStorage key and data
+    function storageKey(room) {
+      return `irf_qi_${room.replace(' ', '_')}`;
+    }
+
+    // Load URL param room number
+    function getRoomFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const roomNum = params.get('room');
+      if (!roomNum) return null;
+      return rooms.find(r => r.endsWith(roomNum)) || null;
+    }
+
+    // Login handler
+    function login() {
+      const pin = document.getElementById('pinInput').value.trim();
+      if (pin === correctPin) {
+        document.getElementById('login-section').style.display = 'none';
+        document.getElementById('app').style.display = 'block';
+        setup();
+      } else {
+        alert('Incorrect PIN');
+      }
+    }
+
+    // Setup UI after login
+    function setup() {
+      const selector = document.getElementById('patientSelector');
+      selector.innerHTML = '';
+      rooms.forEach(room => {
+        const opt = document.createElement('option');
+        opt.value = room;
+        opt.textContent = room;
+        selector.appendChild(opt);
+      });
+
+      // If URL param has room, select it
+      const roomFromUrl = getRoomFromUrl();
+      if (roomFromUrl) {
+        selector.value = roomFromUrl;
+      }
+
+      // Render QI score selects
+      renderScoreInputs('evalScores');
+      renderScoreInputs('goalScores');
+      renderScoreInputs('currentScores');
+
+      // Add change listeners for autosave
+      addAutoSaveListeners();
+
+      // Load data for selected room
+      loadData();
+    }
+
+    function renderScoreInputs(containerId) {
+      const container = document.getElementById(containerId);
+      container.innerHTML = '';
+      tasks.forEach(task => {
+        const div = document.createElement('div');
+        div.className = 'task';
+        div.innerHTML = `
+          <label>${task}:
+            <select class="score-select" data-task="${task}" data-section="${containerId}">
+              ${Object.entries(scores).map(([val, label]) => `<option value="${val}">${val} - ${label}</option>`).join('')}
+            </select>
+          </label>
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    function addAutoSaveListeners() {
+      // Score selects
+      document.querySelectorAll('.score-select').forEach(el => {
+        el.addEventListener('change', saveData);
+      });
+
+      // Patient Goal
+      document.getElementById('patientGoal').addEventListener('input', saveData);
+
+      // Progress Status radios
+      document.querySelectorAll('input[name="progressStatus"]').forEach(el => {
+        el.addEventListener('change', saveData);
+      });
+
+      // Barriers checkboxes
+      document.querySelectorAll('.barrier').forEach(el => {
+        el.addEventListener('change', saveData);
+      });
+
+      // Interventions checkboxes
+      document.querySelectorAll('.intervention').forEach(el => {
+        el.addEventListener('change', saveData);
+      });
+
+      // DME notes
+      document.getElementById('dmeNotes').addEventListener('input', saveData);
+
+      // Room selector
+      document.getElementById('patientSelector').addEventListener('change', () => {
+        loadData();
+      });
+    }
+
+    // Save all inputs to localStorage
+    function saveData() {
+      const room = document.getElementById('patientSelector').value;
+      if (!room) return;
+
+      const data = {
+        evalScores: {},
+        goalScores: {},
+        currentScores: {},
+        patientGoal: document.getElementById('patientGoal').value,
+        progressStatus: document.querySelector('input[name="progressStatus"]:checked')?.value || 'Progressing',
+        barriers: [],
+        interventions: [],
+        dmeNotes: document.getElementById('dmeNotes').value,
+      };
+
+      // Save scores per section
+      document.querySelectorAll('.score-select').forEach(el => {
+        const section = el.getAttribute('data-section');
+        const task = el.getAttribute('data-task');
+        const val = el.value;
+        if (section && task) {
+          data[section][task] = val;
+        }
+      });
+
+      // Barriers checked
+      document.querySelectorAll('.barrier:checked').forEach(el => {
+        data.barriers.push(el.value);
+      });
+
+      // Interventions checked
+      document.querySelectorAll('.intervention:checked').forEach(el => {
+        data.interventions.push(el.value);
+      });
+
+      localStorage.setItem(storageKey(room), JSON.stringify(data));
+    }
+
+    // Load data from localStorage and populate inputs
+    function loadData() {
+      const room = document.getElementById('patientSelector').value;
+      if (!room) return;
+
+      const raw = localStorage.getItem(storageKey(room));
+      if (!raw) {
+        clearInputs();
+        return;
+      }
+      const data = JSON.parse(raw);
+
+      // Scores
+      setScores('evalScores', data.evalScores);
+      setScores('goalScores', data.goalScores);
+      setScores('currentScores', data.currentScores);
+
+      // Patient goal
+      document.getElementById('patientGoal').value = data.patientGoal || '';
+
+      // Progress status
+      const progressRadios = document.querySelectorAll('input[name="progressStatus"]');
+      progressRadios.forEach(r => {
+        r.checked = r.value === data.progressStatus;
+      });
+
+      // Barriers
+      document.querySelectorAll('.barrier').forEach(cb => {
+        cb.checked = data.barriers?.includes(cb.value);
+      });
+
+      // Interventions
+      document.querySelectorAll('.intervention').forEach(cb => {
+        cb.checked = data.interventions?.includes(cb.value);
+      });
+
+      // DME notes
+      document.getElementById('dmeNotes').value = data.dmeNotes || '';
+    }
+
+    // Set score selects per section from loaded data
+    function setScores(sectionId, scoresData) {
+      if (!scoresData) return;
+      document.querySelectorAll(`#${sectionId} .score-select`).forEach(el => {
+        const task = el.getAttribute('data-task');
+        if (task && scoresData[task]) {
+          el.value = scoresData[task];
+        } else {
+          el.value = '6'; // default Independent
+        }
+      });
+    }
+
+    function clearInputs() {
+      ['evalScores', 'goalScores', 'currentScores'].forEach(sectionId => {
+        document.querySelectorAll(`#${sectionId} .score-select`).forEach(el => el.value = '6');
+      });
+      document.getElementById('patientGoal').value = '';
+      document.querySelector('input[name="progressStatus"][value="Progressing"]').checked = true;
+      document.querySelectorAll('.barrier').forEach(cb => cb.checked = true);
+      document.querySelectorAll('.intervention').forEach(cb => cb.checked = true);
+      document.getElementById('dmeNotes').value = '';
+    }
+  </script>
+</body>
+</html>
